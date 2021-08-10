@@ -1,0 +1,363 @@
+---
+title: "03. Linear regression"
+author: "GS"
+date: "10/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, comment = "", warning = F)
+```
+
+```{r}
+library(ISLR)
+library(MASS) # for the Boston data set
+library(tidymodels)
+library(GGally)
+library(corrplot)
+
+theme_set(theme_bw())
+```
+
+# An Introduction to Statistical Learning (2nd ed.)
+### Labs
+
+## Chapter 03
+## Linear regression
+
+The Boston data set contain various statistics for 506 neighborhoods in Boston. We will build a simple linear regression model that related the median value of owner-occupied homes (medv) as the response with a variable indicating the percentage of the population that belongs to a lower status (lstat) as the predictor.
+
+The Boston data set is quite outdated and contains some really unfortunate variables.
+
+```{r EDA}
+boston <- tibble(Boston)
+glimpse(boston)
+
+colSums(is.na(boston))
+
+corr <- cor(boston)
+corrplot(corr, method = "square", type = "upper")
+
+ggpairs(boston)
+
+ggplot(boston, aes(medv)) + 
+  geom_density(fill = 'lightgrey') + 
+  xlab("Median value") + 
+  ggtitle("Median value of Boston homes in 506 neighborhoods ")
+```
+
+
+We start by creating a parsnip specification for a linear regression model.
+```{r lm model}
+lm_model <- 
+  linear_reg() %>% 
+  set_engine("lm")
+
+lm_model
+
+#While it is unnecessary to set the mode for a linear regression since it can only be regression, we continue to do it in these labs to be explicit.
+
+#The specification doesn’t perform any calculations by itself. It is just a specification of what we want to do.
+```
+
+Once we have the specification we can fit it by supplying a formula expression and the data we want to fit the model on. The formula is written on the form y ~ x where y is the name of the response and x is the name of the predictors. The names used in the formula should match the names of the variables in the data set passed to data.
+```{r model fit}
+lm_fit <- 
+  fit(lm_model,
+      medv ~ lstat,
+      data = boston)
+
+lm_fit
+```
+
+The result of this fit is a parsnip model object. This object contains the underlying fit as well as some parsnip-specific information. If we want to look at the underlying fit object we can access it with lm_fit$fit or with.
+```{r}
+lm_fit %>% 
+  pluck("fit") %>% 
+  summary()
+```
+
+We can use packages from the broom package to extract key information out of the model objects in tidy formats.
+
+the tidy() function returns the parameter estimates of a lm object.
+```{r}
+tidy(lm_fit)
+```
+
+and glance() can be used to extract the model statistics.
+
+```{r}
+glance1 <- glance(lm_fit)
+glance1 <- glance1 %>% 
+  select(-c(logLik, deviance, nobs)) %>% 
+  mutate(model = "medv ~ lstat")
+glance1
+```
+
+We need to explicitly supply the data set that the predictions should be performed on via the new_data argument.
+```{r predict}
+predict(lm_fit, boston)
+```
+
+Notice how the predictions are returned as a tibble. This will always be the case for parsnip models, no matter what engine is used. This is very useful since consistency allows us to combine data sets easily.
+
+We can also return other types of predicts by specifying the type argument. Setting type = "conf_int" return a 95% confidence interval.
+
+```{r intervals}
+predict(lm_fit, boston, type = "conf_int")
+predict(lm_fit, boston, type = "pred_int")
+```
+
+You can get the same results using the augment() function to same you a little bit of typing.
+
+```{r}
+augment(lm_fit, boston) %>% 
+  select(medv, .pred, .resid)
+```
+
+### Multiple Linear Regression
+
+```{r}
+lm_fit2 <- 
+  fit(lm_model,
+      medv ~ lstat + age,
+      data = boston)
+
+lm_fit2
+```
+```{r}
+lm_fit2 %>% 
+  pluck("fit") %>% 
+  summary()
+```
+```{r}
+tidy(lm_fit2)
+```
+```{r}
+glance2 <- glance(lm_fit2)
+glance2 <- glance2 %>% 
+  select(-c(logLik, deviance, nobs)) %>% 
+  mutate(model = "medv ~ lstat + age")
+glance2
+
+```
+```{r}
+augment(lm_fit2, boston) %>% 
+  select(medv, .pred, .resid)
+```
+
+### Interaction terms
+
+Adding interaction terms are quite easy to do using formula expressions. However, the syntax used to describe them isn’t accepted by all engines so we will go over how to include interaction terms using recipes as well.
+
+There are two ways on including an interaction term; x:y and x * y
+
+- x:y will include the interaction between x and y,
+- x * y will include the interaction between x and y, x, and y, e.i. it is short for x:y + x + y.
+
+with that out of the way let expand lm_fit2 by adding an interaction term
+
+```{r}
+lm_fit3 <- 
+  fit(lm_model,
+      medv ~ lstat * age,
+      data = boston)
+lm_fit3
+```
+
+```{r}
+lm_fit3 %>% 
+  pluck("fit") %>% 
+  summary()
+```
+```{r}
+tidy(lm_fit3)
+```
+```{r}
+glance3 <- glance(lm_fit3)
+glance3 <- glance3 %>% 
+  select(-c(logLik, deviance, nobs)) %>% 
+  mutate(model = "medv ~ lstat*age")
+glance3
+
+```
+
+```{r}
+augment(lm_fit3, boston) %>% 
+  select(medv, .pred, .resid)
+```
+
+Sometimes we want to perform transformations, and we want those transformations to be applied, as part of the model fit as a pre-processing step. We will use the recipes package for this task.
+
+We use the step_interact() to specify the interaction term. Next, we create a workflow object to combine the linear regression model specification lm_spec with the pre-processing specification rec_spec_interact which can then be fitted much like a parsnip model specification.
+
+```{r}
+lm_rec_interact <- 
+  recipe(medv ~ lstat + age, data = boston) %>% 
+  step_interact(~ lstat : age)
+```
+
+```{r}
+lm_wf_interact <- 
+  workflow() %>% 
+  add_model(lm_model) %>% 
+  add_recipe(lm_rec_interact)
+
+lm_wf_interact
+
+```
+
+```{r}
+fit(lm_wf_interact, boston)
+```
+
+
+### Non-linear transformations of the predictors
+
+Much like we could use recipes to create interaction terms between values are we able to apply transformations to individual variables as well. If you are familiar with the dplyr package then you know how to mutate() which works in much the same way using step_mutate().
+
+You would want to keep as much of the pre-processing inside recipes such that the transformation will be applied consistently to new data.
+```{r}
+lm_rec_pow2 <- 
+  recipe(medv ~ lstat, data = boston) %>% 
+  step_mutate(lstat2 = lstat ^ 2)
+
+lm_wf_pow2 <- 
+  workflow() %>% 
+  add_model(lm_model) %>% 
+  add_recipe(lm_rec_pow2)
+
+lm_fit_pow2 <- fit(lm_wf_pow2, boston)
+
+tidy(lm_fit_pow2)
+
+glance4 <- glance(lm_fit_pow2)
+glance4 <- glance4 %>% 
+  select(-c(logLik, deviance, nobs)) %>% 
+  mutate(model = "medv ~ lstat ^2")
+glance4
+
+```
+
+lm log model
+```{r}
+lm_rec_log <- 
+  recipe(
+    medv ~ lstat, data = boston) %>% 
+  step_log(lstat)
+lm_rec_log
+
+lm_wf_log <- 
+  workflow() %>% 
+  add_model(lm_model) %>% 
+  add_recipe(lm_rec_log)
+
+lm_fit_log <- fit(lm_wf_log, boston)
+
+tidy(lm_fit_log)
+
+glance5 <- glance(lm_fit_log)
+glance5 <- glance5 %>% 
+  select(-c(logLik, deviance, nobs)) %>% 
+  mutate(model = "medv ~ log(lstat)")
+glance5
+```
+
+Comparing models
+```{r}
+comparison <- 
+  bind_rows(glance1, glance2, glance3, glance4, glance5) %>% 
+  select(model, everything())
+
+comparison
+```
+
+
+
+
+### Qualitative predictors
+
+We will now turn our attention to the Carseats data set. We will attempt to predict Sales of child car seats in 400 locations based on a number of predictors. One of these variables is ShelveLoc which is a qualitative predictor that indicates the quality of the shelving location. ShelveLoc takes on three possible values.
+
+- Bad
+
+- Medium
+
+- Good
+
+If you pass such a variable to lm() it will read it and generate dummy variables automatically using the following convention.
+
+```{r}
+carseats = tibble(Carseats)
+glimpse(carseats)
+levels(carseats$ShelveLoc)
+```
+
+```{r}
+carseats %>% 
+  pull(ShelveLoc) %>% 
+  contrasts()
+```
+The step_dummy() will perform the same transformation of turning 1 qualitative with C levels into C-1 indicator variables. While this might seem unnecessary right now, some of the engines, later on, do not handle qualitative variables and this step would be necessary. We are also using the all_nominal_predictors() selector to select all character and factor predictor variables. This allows us to select by type rather than having to type out the names.
+
+```{r}
+lm_rec_qual <-
+  recipe(Sales ~ ., data = carseats) %>% 
+  step_dummy(all_nominal_predictors()) %>% 
+  step_interact(~ Income: Advertising + Price: Age)
+
+lm_wf_qual <- 
+  workflow() %>% 
+  add_model(lm_model) %>% 
+  add_recipe(lm_rec_qual)
+
+lm_wf_qual
+```
+
+```{r}
+fit(lm_wf_qual, carseats)
+fit(lm_wf_qual, carseats) %>% tidy()
+fit(lm_wf_qual, carseats) %>% glance()
+```
+
+An Introduction to Statistcial Learning <https://www.statlearning.com/>
+
+-- END
+
+
+```{r}
+sessionInfo()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
