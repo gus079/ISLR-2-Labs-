@@ -322,6 +322,8 @@ fit(lm_wf_qual, carseats) %>% glance()
 
 An Introduction to Statistcial Learning <https://www.statlearning.com/>
 
+ISLR tidymodels Labs <https://emilhvitfeldt.github.io/ISLR-tidymodels-labs/linear-regression.html>
+
 -- END
 
 

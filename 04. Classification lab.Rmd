@@ -1,0 +1,336 @@
+---
+title: "04. Classification lab"
+author: "GS"
+date: "11/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, comment = "", warning = F)
+```
+
+# Packages
+```{r}
+library(ISLR)
+library(discrim) # for LDA and QDA
+library(tidymodels)
+library(GGally)
+library(corrr)
+
+theme_set(theme_bw())
+```
+
+# An Introduction to Statistical Learning (2nd ed.)
+### Labs
+
+## Chapter 04
+## Classification
+
+We will be examining the Smarket data set for this lab. It contains a number of numeric variables plus a variable called Direction which has the two labels "Up" and "Down". Before we do on to modeling, let us take a look at the correlation between the variables.
+
+To look at the correlation, we will use the corrr package. The correlate() function will calculate the correlation matrix between all the variables that it is being fed. We will therefore remove Direction as it is not numeric. Then we pass that to rplot() to quickly visualize the correlation matrix. I have also changed the colours argument to better see what is going on.
+
+###EDA
+```{r}
+smarket <- tibble(Smarket)
+glimpse(smarket)
+smarket %>% slice(1:4)
+
+smarket %>% 
+  group_by(Direction) %>% 
+  count()
+```
+
+And we see that these variables are more or less uncorrelated with each other. The other pair is Year and Volume that is a little correlated.
+
+If you want to create heatmap styled correlation chart you can also create it manually.
+
+```{r}
+library(ggcorrplot)
+
+correl <- smarket %>% 
+  select(-Direction) %>% 
+  cor()
+
+ggcorrplot(correl, hc.order = T, type = "lower", lab = T)
+
+```
+```{r}
+ggplot(smarket, aes(Year, Volume)) + 
+  geom_jitter()
+```
+## Logistic Regression
+
+Now we will fit a logistic regression model. We will again use the parsnip package, and we will use logistic_reg() to create a logistic regression model specification.
+
+```{r}
+log_model <- 
+  logistic_reg() %>% 
+  set_engine("glm")
+```
+
+We can now fit the model like normal. We want to model the Direction of the stock market based on the percentage return from the 5 previous days plus the volume of shares traded. When fitting a classification with parsnip requires that the response variable is a factor. This is the case for the Smarket data set so we don’t need to do adjustments.
+
+```{r}
+  
+```
+```{r}
+log_fit <- 
+  fit(log_model, 
+      Direction ~ Lag1 + Lag2 + Lag3 + Lag4 + Lag5 + Volume, 
+      data = smarket
+  )
+
+log_fit
+
+log_fit %>% pluck("fit") %>%  summary()
+```
+```{r}
+tidy(log_fit)
+```
+```{r}
+glance(log_fit)
+```
+A good performing model would ideally have high numbers along the diagonal (up-left to down-right) with small numbers on the off-diagonal. We see here that the model isn’t great, as it tends to predict "Down" as "Up" more often than it should.
+```{r}
+predicting <- augment(log_fit, smarket)
+
+conf_mat(predicting,
+         truth = Direction, 
+         estimate = .pred_class)
+
+```
+```{r}
+predicting %>% 
+  accuracy(truth = Direction, estimate = .pred_class)
+
+predicting %>% 
+  roc_auc(truth = Direction, estimate = .pred_Up)
+
+```
+
+We just fit a model and evaluated it on the same data. This doesn’t give us that much information about the model performance. Let us instead split up the data, train it on some of it and then evaluate it on the other part of the data. Since we are working with some data that has a time component, it is natural to fit the model using the first year’s worth of data and evaluate it on the last year. This would more closely match how such a model would be used in real life.
+
+```{r}
+smarket_train <- smarket %>% 
+  filter(Year != 2005)
+
+smarket_test <- smarket %>% 
+  filter(Year == 2005)
+```
+
+```{r}
+log_fit_train <- 
+  fit(log_model, 
+      Direction ~ Lag1 + Lag2 + Lag3 + Lag4 + Lag5 + Volume, 
+      data = smarket_train
+  )
+
+log_fit_train
+
+log_fit_train %>% pluck("fit") %>%  summary()
+```
+
+```{r}
+pred2 <- augment(log_fit_train, smarket_test)
+
+conf_mat(pred2,
+         truth = Direction, 
+         estimate = .pred_class)
+```
+
+
+```{r}
+pred2 %>% 
+  accuracy(truth = Direction, estimate = .pred_class)
+
+pred2 %>% 
+  roc_auc(truth = Direction, estimate = .pred_Up)
+
+```
+
+
+## Linear Discriminant Analysis
+
+Now we will perform LDA on the Smarket data. We will use the discrim_linear() function to create a LDA specification. We will continue to use 2 predictors for easy comparison.
+
+```{r}
+lda_model <- 
+  discrim_linear() %>% 
+  set_engine("MASS") %>% 
+  set_mode("classification")
+```
+```{r}
+lda_fit <- 
+  fit(lda_model,
+      Direction ~ Lag1 + Lag2, 
+      data = smarket_train
+      )
+
+lda_fit
+
+```
+```{r}
+predict(lda_fit, smarket_test)
+predict(lda_fit, smarket_test, type = "prob")
+
+```
+```{r}
+lda_pred <- augment(lda_fit, smarket_test)
+lda_pred
+
+lda_pred %>% conf_mat(truth = Direction, estimate = .pred_class)
+
+lda_pred %>% accuracy(truth = Direction, estimate = .pred_class)
+lda_pred %>% roc_auc(truth = Direction, estimate = .pred_Up)
+```
+
+
+## K-Nearest Neighbors
+
+```{r}
+knn_model1 <- 
+  nearest_neighbor(neighbors = 1) %>% 
+  set_engine("kknn") %>% 
+  set_mode("classification")
+
+knn_model3 <- 
+  nearest_neighbor(neighbors = 3) %>% 
+  set_engine("kknn") %>% 
+  set_mode("classification")
+
+knn_model5 <- 
+  nearest_neighbor(neighbors = 5) %>% 
+  set_engine("kknn") %>% 
+  set_mode("classification")
+```
+```{r}
+knn_fit1 <- 
+  fit(knn_model1,
+      Direction ~Lag1 + Lag2,
+      data = smarket_train)
+
+knn_fit3 <- 
+  fit(knn_model3,
+      Direction ~Lag1 + Lag2,
+      data = smarket_train)
+
+knn_fit5 <- 
+  fit(knn_model5,
+      Direction ~Lag1 + Lag2,
+      data = smarket_train)
+```
+
+```{r}
+knn_pred1 <- 
+  augment(knn_fit1, smarket_test)
+
+knn_pred3 <- 
+  augment(knn_fit3, smarket_test)
+
+knn_pred5 <- 
+  augment(knn_fit5, smarket_test)
+```
+```{r}
+knn_pred1 %>% 
+  conf_mat(
+    truth = Direction,
+    estimate = .pred_class
+    )
+
+knn_pred3 %>% 
+  conf_mat(
+    truth = Direction,
+    estimate = .pred_class
+    )
+
+knn_pred5 %>% 
+  conf_mat(
+    truth = Direction,
+    estimate = .pred_class
+    )
+
+```
+```{r}
+knn_pred1 %>% accuracy(truth = Direction, estimate = .pred_class)
+knn_pred3 %>% accuracy(truth = Direction, estimate = .pred_class)
+knn_pred5 %>% accuracy(truth = Direction, estimate = .pred_class)
+
+knn_pred1 %>% roc_auc(truth = Direction, estimate = .pred_Up)
+knn_pred3 %>% roc_auc(truth = Direction, estimate = .pred_Up)
+knn_pred5 %>% roc_auc(truth = Direction, estimate = .pred_Up)
+```
+
+
+### Comapring models
+This section is new and not part of ISLR. We have fitted a lot of different models in this lab. And we were able to calculate the performance metrics one by one, but it is not ideal if we want to compare the different models. Below is an example of how you can more conveniently calculate performance metrics for multiple models at the same time.
+
+Start of by creating a named list of the fitted models you want to evaluate. I have made sure only to include models that were fitted on the same parameters to make it easier to compare them.
+
+```{r}
+models <- list(
+  "log_reg" = log_fit_train,
+  "LDA" = lda_fit,
+  "KNN1" = knn_fit1,
+  "KNN5" = knn_fit5
+  )
+
+```
+```{r}
+preds <- imap_dfr(models, 
+                  augment,
+                  new_data = smarket_test,
+                  .id = "model")
+
+preds %>% 
+  dplyr::select(Direction, .pred_class, .pred_Down, .pred_Up)
+
+multi_metric <- metric_set(accuracy, sensitivity, specificity)
+
+preds %>% 
+  group_by(model) %>% 
+  multi_metric(truth = Direction, estimate = .pred_class)
+
+```
+
+```{r}
+preds %>% 
+  group_by(model) %>% 
+  roc_curve(Direction, .pred_Down) %>% 
+  autoplot()
+
+```
+
+An Introduction to Statistcial Learning <https://www.statlearning.com/>
+
+ISLR tidymodels Labs <https://emilhvitfeldt.github.io/ISLR-tidymodels-labs/linear-regression.html>
+
+-- END
+
+
+```{r}
+sessionInfo()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

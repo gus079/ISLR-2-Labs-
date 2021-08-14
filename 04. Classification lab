@@ -1,0 +1,104 @@
+---
+title: "04. Classification lab"
+author: "GS"
+date: "11/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, comment = "", warning = F)
+```
+
+# Packages
+```{r}
+library(ISLR)
+library(discrim) # for LDA and QDA
+library(tidymodels)
+library(GGally)
+library(corrr)
+
+theme_set(theme_bw())
+```
+
+# An Introduction to Statistical Learning (2nd ed.)
+### Labs
+
+## Chapter 04
+## Classification
+
+We will be examining the Smarket data set for this lab. It contains a number of numeric variables plus a variable called Direction which has the two labels "Up" and "Down". Before we do on to modeling, let us take a look at the correlation between the variables.
+
+To look at the correlation, we will use the corrr package. The correlate() function will calculate the correlation matrix between all the variables that it is being fed. We will therefore remove Direction as it is not numeric. Then we pass that to rplot() to quickly visualize the correlation matrix. I have also changed the colours argument to better see what is going on.
+
+###EDA
+```{r}
+smarket <- tibble(Smarket)
+glimpse(smarket)
+smarket %>% slice(1:4)
+```
+```{r}
+cor_tbl <- smarket %>% 
+  select(-Direction) %>% 
+  correlate()
+cor_tbl
+
+
+rplot(cor_tbl, colours = c("indianred2", "black", "skyblue1"))
+```
+And we see that these variables are more or less uncorrelated with each other. The other pair is Year and Volume that is a little correlated.
+
+If you want to create heatmap styled correlation chart you can also create it manually.
+
+```{r}
+library(paletteer)
+
+cor_tbl %>% stretch()
+
+cor_tbl %>% stretch() %>% 
+  ggplot(aes(x, y, fill= r)) + 
+  geom_tile() + 
+  scale_fill_paletteer_c("scico::roma", limits = c(-1, 1), direction = -1)
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
