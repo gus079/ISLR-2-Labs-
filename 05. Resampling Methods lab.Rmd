@@ -1,0 +1,195 @@
+---
+title: "05. Resampling Methods"
+author: "GS"
+date: "15/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, comment = "", warning = F)
+```
+
+# An Introduction to Statistical Learning (2nd ed.)
+### Labs
+
+## Chapter 05
+## resampling Methods
+
+```{r packages & tibbles}
+library(tidymodels)
+library(ISLR)
+
+theme_set(theme_bw())
+
+auto <- tibble(Auto)
+portfolio <- tibble(Portfolio)
+```
+```{r}
+glimpse(auto)
+glimpse(portfolio)
+```
+
+
+When fitting a model it is often desired to be able to calculate a performance metric to quantify how well the model fits the data. If a model is evaluated on the data it was fit on you are quite likely to get over-optimistic results. It is therefore we split our data into testing and training. This way we can fit the model to data and evaluate it on some other that that is similar.
+
+Splitting of the data is done using random sampling, so it is advised to set a seed before splitting to assure we can reproduce the results. The inintial_split() function takes a data.frame and returns a rsplit object. This object contains information about which observations belong to which data set, testing, and training. This is where you would normally set a proportion of data that is used for training and how much is used for evaluation. This is set using the prop argument which I set to 0.5 to closely match what happened in ISLR. I’m also setting the strata argument. This argument makes sure that both sides of the split have roughly the same distribution for each value of strata. If a numeric variable is passed to strata then it is binned and distributions are matched within bins.
+
+
+```{r split}
+set.seed(1)
+auto_split <- initial_split(Auto, prop = .5, strata = mpg)
+
+auto_train <- training(auto_split)
+auto_test <- testing(auto_split)
+```
+
+Now that we have a train-test split let us fit some models and evaluate their performance. Before we move on it is important to reiterate that you should only use the testing data set once! Once you have looked at the performance on the testing data set you should not modify your models. If you do you might overfit the model due to data leakage.
+
+Our modeling goal is to predict mpg by horsepower using a simple linear regression model, and a polynomial regression model. First, we set up a linear regression specification.
+
+```{r linear regression}
+lm_model <- 
+  linear_reg() %>% 
+  set_engine("lm")
+
+lm_fit <- 
+  fit(
+    lm_model, 
+    mpg ~ horsepower,
+    data = auto_train
+  )
+
+lm_fit
+
+lm_fit %>% pluck("fit") %>% summary()
+```
+```{r prediction}
+pred <- augment(
+  lm_fit,
+  auto_test
+  )
+```
+```{r metrics lm}
+pred %>% 
+  rmse(truth = mpg, estimate = .pred)
+
+pred %>% 
+  rsq(truth = mpg, estimate = .pred)
+```
+
+```{r poly reg}
+poly_rec <- 
+  recipe(mpg ~horsepower, data = auto_train) %>% 
+  step_poly(horsepower, degree = 2)
+
+poly_wf <- 
+  workflow() %>% 
+  add_recipe(poly_rec) %>% 
+  add_model(lm_model)
+
+poly_fit <- 
+  fit(
+    poly_wf,
+    data = auto_train
+  )
+
+poly_fit
+
+```
+```{r pred poly}
+
+pred_poly <- augment(poly_fit, auto_test)
+```
+```{r poly metrics}
+rmse(pred_poly,
+     truth = mpg,
+     estimate = .pred
+     )
+
+rsq(pred_poly,
+     truth = mpg,
+     estimate = .pred
+     )
+```
+
+## Cross validation
+
+```{r validation folds}
+set.seed(2021)
+auto_cv <- vfold_cv(auto_train, v = 10)
+```
+
+```{r tuning polynomials param}
+tuned_poly_rec <- 
+  recipe(mpg ~horsepower, data = auto_train) %>% 
+  step_poly(horsepower, degree = tune())
+
+
+tuned_poly_rec %>% parameters
+
+tuned_poly_rec %>% pull_dials_object("degree")
+
+tuned_poly_wf <- 
+  workflow() %>% 
+  add_recipe(tuned_poly_rec) %>% 
+  add_model(lm_model)
+```
+```{r grid}
+poly_grid <- grid_regular(degree(c(1,10)), levels = 10)
+
+#poly_grid_tbl <- crossing(degree = 1:10)
+```
+
+
+```{r fitting poly, cache = TRUE}
+ctrl <- control_grid(save_pred = T, save_workflow = T)
+
+poly_fit <- 
+  tune_grid(
+    tuned_poly_wf,
+    resamples = auto_cv,
+    grid = poly_grid,
+    metrics = metric_set(rmse, rsq, mae),
+    control = ctrl
+  )
+```
+```{r metrics}
+poly_fit %>% collect_metrics()
+
+autoplot(poly_fit) + scale_x_continuous(breaks = 1:10)
+
+poly_fit %>% show_best(metric = "rmse")
+
+best_tune <- poly_fit %>% select_best(metric = "rmse")
+
+poly_fit %>% select_by_one_std_err(degree, metric = "rmse")
+
+```
+```{r final model, cache = TRUE}
+poly_final_wf <- tuned_poly_wf %>% 
+  finalize_workflow(best_tune)
+
+final_poly_fit <- 
+  last_fit(poly_final_wf,
+           split = auto_split)
+
+```
+```{r pred metrics}
+final_poly_fit %>% collect_metrics()
+
+final_poly_fit %>% collect_predictions() %>% 
+  ggplot(aes(x = .pred, y = mpg)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", fill = "lightblue")
+```
+
+
+[An Introduction to Statistcial Learning](https://www.statlearning.com/)
+
+[ISLR tidymodels Labs](https://emilhvitfeldt.github.io/ISLR-tidymodels-labs/linear-regression.html)
+
+-- END
+
+
+```{r}
+sessionInfo()
