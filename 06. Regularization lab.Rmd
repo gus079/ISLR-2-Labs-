@@ -1,0 +1,356 @@
+---
+title: "06. Regularization"
+author: "GS"
+date: "16/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F, comment = "", fig.align = "center", fig.asp = ".618")
+```
+
+# An Introduction to Statistical Learning (2nd ed.)
+### Labs
+
+[An Introduction to Statistcial Learning](https://www.statlearning.com/)
+
+[ISLR tidymodels Labs](https://emilhvitfeldt.github.io/ISLR-tidymodels-labs/linear-regression.html)
+
+## Chapter 06
+## Regularization
+
+We will be using the Hitters data set from the ISLR package. We wish to predict the baseball players Salary based on several different characteristics which are included in the data set. Since we wish to predict Salary, then we need to remove any missing data from that column. Otherwise, we won’t be able to run the models.
+
+```{r packages}
+library(tidymodels)
+library(ISLR)
+library(ggcorrplot)
+
+theme_set(theme_bw())
+```
+
+```{r data}
+hitters <- tibble(Hitters)
+
+glimpse(hitters)
+
+sum(is.na(hitters$Salary))
+
+#Remove na
+hitters <- hitters %>% 
+  filter(!is.na(Salary))
+
+sum(is.na(hitters$Salary))
+```
+```{r EDA}
+hitters %>% 
+  select(is.numeric) %>% 
+  cor %>% 
+  ggcorrplot(hc.order = T, type = "lower", lab = T)
+
+ggplot(hitters, aes(Salary)) + 
+  geom_histogram(fill = "lightgrey", color = 'black') 
+
+ggplot(hitters, aes(Salary, color = NewLeague)) + 
+  geom_density() 
+
+```
+
+## Ridge Regression
+
+We will use the glmnet package to perform ridge regression. parsnip does not have a dedicated function to create a ridge regression model specification. You need to use linear_reg() and set mixture = 0 to specify a ridge model. The mixture argument specifies the amount of different types of regularization, mixture = 0 specifies only ridge regularization and mixture = 1 specifies only lasso regularization. Setting mixture to a value between 0 and 1 lets us use both. When using the glmnet engine we also need to set a penalty to be able to fit the model. We will set this value to 0 for now, it is not the best value, but we will look at how to select the best value in a little bit.
+
+```{r model}
+ridge_model <- linear_reg(mixture = 0, penalty = 0) %>% 
+  set_engine("glmnet") %>% 
+  set_mode("regression")
+```
+
+```{r fit}
+ridge_fit <- 
+  fit(
+    ridge_model,
+    Salary ~ ., 
+    data = hitters
+  )
+
+tidy(ridge_fit)
+
+tidy(ridge_fit, penalty = 50) %>% slice(1:10)
+tidy(ridge_fit, penalty = 705) %>% slice(1:10)
+
+
+```
+
+```{r penalty plot}
+ridge_fit %>% 
+  extract_fit_engine() %>% 
+  plot(xvar = "lambda")
+```
+
+### Tuning ridge with tidymodels
+
+```{r split and resamples}
+set.seed(2021)
+hitters_split <- initial_split(hitters, prop = .75)
+hitters_train <- training(hitters_split)
+hitters_test <- testing(hitters_split)
+
+set.seed(2021)
+hitters_cv <- vfold_cv(hitters_train, v = 10)
+```
+
+```{r recipe}
+hitters_rec <- 
+  recipe(Salary ~ ., data = hitters) %>% 
+  step_novel(all_nominal_predictors()) %>% 
+  step_dummy(all_nominal_predictors()) %>% 
+  step_zv(all_numeric_predictors()) %>% 
+  step_normalize(all_numeric_predictors()) 
+```
+
+```{r model with tuning}
+tuned_ridge_model <- 
+  linear_reg(mixture = 0, penalty = tune()) %>% 
+  set_engine("glmnet") %>% 
+  set_mode("regression")
+```
+
+```{r workflow}
+ridge_wf <- 
+  workflow() %>% 
+  add_recipe(hitters_rec) %>% 
+  add_model(tuned_ridge_model)
+```
+
+```{r grid}
+ridge_wf %>% parameters()
+ridge_wf %>% pull_dials_object("penalty")
+
+penalty_grid <- grid_regular(penalty(range = c(-5, 5)), levels = 50)
+```
+```{r fitting, cache = T}
+fit_tuned_ridge <- 
+  tune_grid(
+    ridge_wf,
+    resamples = hitters_cv,
+    grid = penalty_grid,
+    control = control_grid(save_pred = T)
+  )
+
+```
+
+```{r metrics}
+fit_tuned_ridge %>% collect_metrics()
+autoplot(fit_tuned_ridge)
+
+best_ridge <- fit_tuned_ridge %>% select_best(metric = "rmse")
+```
+Here we see that the amount of regularization affects the performance metrics differently. Note how there are areas where the amount of regularization doesn’t have any meaningful influence on the coefficient estimates.
+
+```{r final wf & fit}
+final_ridge_wf <- 
+  ridge_wf %>% 
+  finalize_workflow(best_ridge)
+
+ridge_lastfit <- last_fit(
+  final_ridge_wf,
+  split = hitters_split
+)
+
+ridge_lastfit %>% collect_predictions() %>% 
+  ggplot(aes(Salary, .pred)) +
+  geom_point() + 
+  geom_smooth()
+ridge_lastfit %>% collect_metrics()
+```
+
+
+## Lasso
+
+The mixture argument specifies the amount of different types of regularization, mixture = 0 specifies only ridge regularization and mixture = 1 specifies only lasso regularization. Setting mixture to a value between 0 and 1 lets us use both.
+
+```{r lasso model & wf}
+tuned_lasso_model <- 
+  linear_reg(mixture = 1, penalty = tune()) %>% 
+  set_engine("glmnet") %>% 
+  set_mode("regression")
+
+lasso_wf <- 
+  workflow() %>% 
+  add_recipe(hitters_rec) %>% 
+  add_model(tuned_lasso_model)
+```
+
+```{r fitting lasso, cache = T}
+fit_tuned_lasso <- 
+  tune_grid(
+    lasso_wf,
+    resamples = hitters_cv,
+    grid = penalty_grid,
+    metrics = NULL,
+    control = control_grid(save_pred = T)
+  )
+```
+```{r lasso metrics}
+fit_tuned_lasso %>% collect_metrics()
+autoplot(fit_tuned_lasso)
+
+best_lasso <- fit_tuned_lasso %>% select_best(metric = "rmse")
+```
+
+
+### Elastic net
+### Tuning mixture and penalty
+
+```{r elastic model}
+tuned_elastic_model <- 
+  linear_reg(mixture = tune(), penalty = tune()) %>% 
+  set_engine("glmnet") %>% 
+  set_mode("regression")
+
+elastic_wf <- 
+  workflow() %>% 
+  add_recipe(hitters_rec) %>% 
+  add_model(tuned_elastic_model)
+```
+
+```{r elastic grid}
+elastic_wf %>% parameters()
+elastic_wf %>% pull_dials_object("penalty")
+elastic_wf %>% pull_dials_object("mixture")
+
+elastic_grid <- crossing(mixture = seq(0,1, by = .2),
+                         penalty = -5:400)
+```
+```{r fitting elastic, cache = T}
+fit_tuned_elastic <- 
+  tune_grid(
+    elastic_wf,
+    resamples = hitters_cv,
+    grid = elastic_grid,
+    control = control_grid(save_pred = T)
+  )
+```
+
+```{r elastic metrics}
+fit_tuned_elastic %>% collect_metrics() %>%View
+autoplot(fit_tuned_elastic)
+
+fit_tuned_elastic %>% show_best(metric = "rmse")
+fit_tuned_elastic %>% show_best(metric = "rsq")
+best_elastic <- fit_tuned_elastic %>% select_best(metric = "rmse")
+```
+
+
+
+## Principal Component Analysis
+
+I will treat principal component regression as a linear model with PCA transformations in the preprocessing. But using the tidymodels framework then this is still mostly one model.
+
+```{r PCA model}
+lm_model <- 
+  linear_reg() %>% 
+  set_mode("regression") %>% 
+  set_engine("lm")
+```
+
+```{r PCA rec & wf}
+pca_recipe <- 
+  recipe(formula = Salary ~ ., data = hitters_train) %>% 
+  step_novel(all_nominal_predictors()) %>% 
+  step_dummy(all_nominal_predictors()) %>% 
+  step_zv(all_predictors()) %>% 
+  step_normalize(all_predictors()) %>%
+  step_pca(all_predictors(), threshold = tune(), num_comp = tune())
+
+pca_wf <- 
+  workflow() %>% 
+  add_recipe(pca_recipe) %>% 
+  add_model(lm_model)
+```
+
+```{r pca grid}
+pca_wf %>% parameters()
+pca_wf %>% pull_dials_object("num_comp")
+pca_wf %>% pull_dials_object("threshold")
+
+pca_grid <- crossing(num_comp = 0:10,
+                     threshold = seq(0,1, by=.1)
+                     )
+```
+```{r fitting pca, cache = T}
+tune_pca <- 
+  tune_grid(
+    pca_wf,
+    resamples = hitters_cv,
+    grid = pca_grid,
+    control = control_grid(save_pred = T)
+  )
+```
+
+```{r pca metrics}
+tune_pca %>% collect_metrics()
+autoplot(tune_pca) +  scale_x_continuous(breaks = 0:10)
+
+tune_pca %>% show_best(metric = "rmse")
+tune_pca %>% show_best(metric = "rsq")
+(best_pca_rmse <- tune_pca %>% select_best(metric = "rmse"))
+(best_pca_rsq <- tune_pca %>% select_best(metric = "rsq"))
+```
+```{r pred pca}
+final_pca_wf <- 
+  pca_wf %>% 
+  finalize_workflow(best_pca_rmse)
+
+final_pca_fit <- 
+  last_fit(
+    final_pca_wf,
+    split = hitters_split
+  )
+
+```
+```{r pred metrics pca}
+
+final_pca_fit %>% collect_metrics()
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[An Introduction to Statistcial Learning](https://www.statlearning.com/)
+
+[ISLR tidymodels Labs](https://emilhvitfeldt.github.io/ISLR-tidymodels-labs/linear-regression.html)
+
+-- END
+
+
+```{r}
+sessionInfo()
