@@ -193,3 +193,6 @@ final_poly_fit %>% collect_predictions() %>%
 
 ```{r}
 sessionInfo()
+```
+
+

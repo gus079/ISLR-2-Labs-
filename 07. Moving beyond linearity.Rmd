@@ -1,0 +1,292 @@
+---
+title: "07. Moving beyond linearity"
+author: "GS"
+date: "22/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F, comment = "", fig.align = "center", fig.asp = .618)
+```
+
+# An Introduction to Statistical Learning (2nd ed.)
+### Labs
+
+[An Introduction to Statistcial Learning](https://www.statlearning.com/)
+
+[ISLR tidymodels Labs](https://emilhvitfeldt.github.io/ISLR-tidymodels-labs/linear-regression.html)
+
+## Chapter 07
+## Moving Beyond Linearity
+
+```{r, packages}
+library(tidymodels)
+library(ISLR)
+library(ggcorrplot)
+
+theme_set(theme_bw())
+```
+
+```{r, dataset}
+wage <- tibble(Wage)
+```
+
+```{r, EDA}
+glimpse(wage)
+summary(wage)
+
+ggplot(wage, aes(wage))+
+  geom_histogram(fill = "lightgrey", color = "black")
+
+ggplot(wage, aes(age))+
+  geom_histogram(fill = "lightgrey", color = "black")
+
+with(wage, cor.test(wage, age))
+
+ggplot(wage, aes(x = age, y = wage)) + 
+  geom_point()
+
+ggplot(wage, aes(wage, fill= race))+
+  geom_boxplot() + 
+  coord_flip() + 
+  theme(legend.position = "top")
+         
+ggplot(wage, aes(wage, color = jobclass)) + 
+  geom_density()
+
+wage %>% 
+  group_by(jobclass) %>% 
+  summarise(shapiro_test = shapiro.test(wage)$p.value)
+
+ggplot(wage, aes(wage, fill = race))+
+  geom_histogram() + 
+  facet_wrap(. ~ jobclass)
+
+t_test(wage, wage ~ jobclass)
+```
+
+
+## Polynomial regression and Step function
+
+```{r, poly}
+
+poly_rec <- 
+  recipe(wage ~ age, data = wage) %>% 
+  step_poly(age, degree = 4)
+
+lm_model <- 
+  linear_reg() %>% 
+  set_engine("lm")
+
+poly_wf <- 
+  workflow() %>% 
+  add_recipe(poly_rec) %>% 
+  add_model(lm_model)
+```
+```{r, poly fit}
+poly_fit <- fit(poly_wf, data = wage)
+
+tidy(poly_fit)
+```
+
+```{r, pred}
+# this is a toy example
+age_range <- tibble(age = seq(min(wage$age), max(wage$age)))
+
+wage %>%
+  ggplot(aes(age, wage)) +
+  geom_point(alpha = 0.2) +
+  geom_line(aes(y = .pred), color = "darkgreen",
+            data = regression_lines) +
+  geom_line(aes(y = .pred_lower), data = regression_lines, 
+            linetype = "dashed", color = "blue") +
+  geom_line(aes(y = .pred_upper), data = regression_lines, 
+            linetype = "dashed", color = "blue")
+
+wage %>% 
+  ggplot(aes(age, wage)) + 
+  geom_point(alpha = .2) + 
+  geom_smooth()
+```
+
+
+Let us take that one step further and see what happens to the regression line once we go past the domain it was trained on. the previous plot showed individuals within the age range 18-80. Let us see what happens once we push this to 18-100. This is not an impossible range but an unrealistic range.
+
+```{r, out of range}
+wide_age_range <- tibble(age = seq(18, 100))
+
+regression_lines <- bind_cols(
+  augment(poly_fit, new_data = wide_age_range),
+  predict(poly_fit, new_data = wide_age_range, type = "conf_int")
+)
+
+wage %>%
+  ggplot(aes(age, wage)) +
+  geom_point(alpha = 0.2) +
+  geom_line(aes(y = .pred), color = "darkgreen",
+            data = regression_lines) +
+  geom_line(aes(y = .pred_lower), data = regression_lines, 
+            linetype = "dashed", color = "blue") +
+  geom_line(aes(y = .pred_upper), data = regression_lines, 
+            linetype = "dashed", color = "blue")
+
+```
+And we see that the curve starts diverging once we get to 93 the predicted wage is negative. The confidence bands also get wider and wider as we get farther away from the data.
+
+
+### As a classification problem
+
+```{r}
+wage <- wage %>%
+  mutate(salary = factor(wage > 250, 
+                       levels = c(TRUE, FALSE), 
+                       labels = c("High", "Low")))
+
+glimpse(wage)
+
+# Class imbalance!
+wage %>% 
+  group_by(salary) %>% 
+  count() 
+```
+
+
+```{r, poly glm}
+glm_rec <- 
+  recipe(salary ~ age, data = wage) %>% 
+  step_poly(age, degree = 4)
+
+glm_model <- 
+  logistic_reg() %>% 
+  set_engine("glm")
+
+glm_wf <- 
+  workflow() %>% 
+  add_recipe(glm_rec) %>% 
+  add_model(glm_model)
+```
+
+```{r, poly glm fit}
+poly_glm_fit <- fit(glm_wf, wage)
+tidy(poly_glm_fit)
+
+```
+```{r, glm pred}
+predict(poly_glm_fit, wage)
+predict(poly_glm_fit, wage, type= "prob")
+
+regression_glm_lines <- bind_cols(
+  augment(poly_glm_fit, new_data = age_range, type = "prob"),
+  predict(poly_glm_fit, new_data = age_range, type = "conf_int")
+)
+
+regression_glm_lines %>%
+  ggplot(aes(age)) +
+  ylim(c(0, 0.2)) +
+  geom_line(aes(y = .pred_High), color = "darkgreen") +
+  geom_line(aes(y = .pred_lower_High), color = "blue", linetype = "dashed") +
+  geom_line(aes(y = .pred_upper_High), color = "blue", linetype = "dashed") +
+  geom_jitter(aes(y = (salary == "High") / 5), data = wage, 
+              shape = "|", height = 0, width = 0.2)
+```
+
+Next, let us take a look at the step function and how to fit a model using it as a preprocessor. You can create step functions in a couple of different ways. step_discretize() will convert a numeric variable into a factor variable with n bins, n here is specified with num_breaks. These will have approximately the same number of points in them according to the training data set.
+
+```{r, discret}
+discret_rec <- 
+  recipe(salary ~ age, data = wage) %>% 
+  step_discretize(age, num_breaks = 4)
+
+discret_wf <- 
+  workflow() %>% 
+  add_recipe(discret_rec) %>% 
+  add_model(glm_model)
+
+discret_fit <- fit(discret_wf, wage)
+tidy(discret_fit)
+
+```
+If you already know where you want the step function to break then you can use step_cut() and supply the breaks manually.
+
+```{r, cut}
+cut_rec <- recipe(salary ~ age, data = wage) %>%
+  step_cut(age, breaks = c(30, 50, 70))
+
+cut_wf <- workflow() %>%
+  add_model(glm_model) %>%
+  add_recipe(cut_rec)
+
+cut_fit <- fit(cut_wf, data = wage)
+tidy(cut_fit)
+
+```
+## Splines
+
+In order to fit regression splines, or in other words, use splines as preprocessors when fitting a linear model, we use step_bs() to construct the matrices of basis functions. The bs() function is used and arguments such as knots can be passed to bs() by using passing a named list to options.
+
+```{r, splines}
+spline_rec <- recipe(wage ~ age, data = wage) %>%
+  step_bs(age, options = list(knots = 25, 40, 60))
+
+spline_wf <- workflow() %>%
+  add_model(lm_model) %>%
+  add_recipe(spline_rec)
+
+spline_fit <- fit(spline_wf, data = wage)
+
+predict(spline_fit, new_data = wage)
+
+
+regression_bs_lines <- bind_cols(
+  augment(spline_fit, new_data = age_range),
+  predict(spline_fit, new_data = age_range, type = "conf_int")
+  )
+
+wage %>%
+  ggplot(aes(age, wage)) +
+  geom_point(alpha = 0.2) +
+  geom_line(aes(y = .pred), data = regression_bs_lines, color = "blue") +
+  geom_line(aes(y = .pred_lower), data = regression_bs_lines, 
+            linetype = "dashed", color = "blue") +
+  geom_line(aes(y = .pred_upper), data = regression_lines, 
+            linetype = "dashed", color = "blue")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[An Introduction to Statistcial Learning](https://www.statlearning.com/)
+
+[ISLR tidymodels Labs](https://emilhvitfeldt.github.io/ISLR-tidymodels-labs/linear-regression.html)
+
+-- END
+
+
+```{r}
+sessionInfo()
+```
+
+
+
+
+
+
