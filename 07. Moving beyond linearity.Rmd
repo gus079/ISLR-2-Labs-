@@ -91,18 +91,6 @@ tidy(poly_fit)
 
 ```{r, pred}
 # this is a toy example
-age_range <- tibble(age = seq(min(wage$age), max(wage$age)))
-
-wage %>%
-  ggplot(aes(age, wage)) +
-  geom_point(alpha = 0.2) +
-  geom_line(aes(y = .pred), color = "darkgreen",
-            data = regression_lines) +
-  geom_line(aes(y = .pred_lower), data = regression_lines, 
-            linetype = "dashed", color = "blue") +
-  geom_line(aes(y = .pred_upper), data = regression_lines, 
-            linetype = "dashed", color = "blue")
-
 wage %>% 
   ggplot(aes(age, wage)) + 
   geom_point(alpha = .2) + 
@@ -174,20 +162,6 @@ tidy(poly_glm_fit)
 ```{r, glm pred}
 predict(poly_glm_fit, wage)
 predict(poly_glm_fit, wage, type= "prob")
-
-regression_glm_lines <- bind_cols(
-  augment(poly_glm_fit, new_data = age_range, type = "prob"),
-  predict(poly_glm_fit, new_data = age_range, type = "conf_int")
-)
-
-regression_glm_lines %>%
-  ggplot(aes(age)) +
-  ylim(c(0, 0.2)) +
-  geom_line(aes(y = .pred_High), color = "darkgreen") +
-  geom_line(aes(y = .pred_lower_High), color = "blue", linetype = "dashed") +
-  geom_line(aes(y = .pred_upper_High), color = "blue", linetype = "dashed") +
-  geom_jitter(aes(y = (salary == "High") / 5), data = wage, 
-              shape = "|", height = 0, width = 0.2)
 ```
 
 Next, let us take a look at the step function and how to fit a model using it as a preprocessor. You can create step functions in a couple of different ways. step_discretize() will convert a numeric variable into a factor variable with n bins, n here is specified with num_breaks. These will have approximately the same number of points in them according to the training data set.
@@ -236,20 +210,6 @@ spline_fit <- fit(spline_wf, data = wage)
 
 predict(spline_fit, new_data = wage)
 
-
-regression_bs_lines <- bind_cols(
-  augment(spline_fit, new_data = age_range),
-  predict(spline_fit, new_data = age_range, type = "conf_int")
-  )
-
-wage %>%
-  ggplot(aes(age, wage)) +
-  geom_point(alpha = 0.2) +
-  geom_line(aes(y = .pred), data = regression_bs_lines, color = "blue") +
-  geom_line(aes(y = .pred_lower), data = regression_bs_lines, 
-            linetype = "dashed", color = "blue") +
-  geom_line(aes(y = .pred_upper), data = regression_lines, 
-            linetype = "dashed", color = "blue")
 ```
 
 
