@@ -115,6 +115,120 @@ class_tree_fit %>%
 
 ## Bagging and Random Forest
 
+Here we apply bagging and random forests to the Boston data set. We will be using the randomForest package as the engine. A bagging model is the same as a random forest where mtry is equal to the number of predictors. We can specify the mtry to be .cols() which means that the number of columns in the predictor matrix is used. This is useful if you want to make the specification more general and useable to many different data sets. .cols() is one of many descriptors in the parsnip package. We also set importance = TRUE in set_engine() to tell the engine to save the information regarding variable importance. This is needed for this engine if we want to use the vip package later.
+
+
+```{r, bagging}
+bagg_model <- 
+  rand_forest(mtry = .cols()) %>% 
+  set_engine("randomForest", importance = T) %>% 
+  set_mode("classification")
+
+bagg_fit <- fit(bagg_model, High ~ ., data = car_train)
+bagg_fit
+
+bagg_pred <- augment(bagg_fit, car_test) %>% print()
+
+bagg_pred %>% accuracy(truth = High, estimate = .pred_class)
+bagg_pred %>% roc_auc(truth = High, estimate = .pred_No) 
+bagg_pred %>% roc_curve(truth = High, estimate = .pred_No) %>% autoplot()
+vip(bagg_fit)
+```
+
+```{r, rnd_forest}
+
+rf_model <- 
+  rand_forest(mtry = ceiling(sqrt(ncol(carseat)))) %>% 
+  set_engine("randomForest", importance = T) %>% 
+  set_mode("classification")
+
+rf_fit <- fit(rf_model, High ~ ., data = car_train)
+rf_fit
+
+rf_pred <- augment(rf_fit, car_test) %>% print()
+
+rf_pred %>% accuracy(truth = High, estimate = .pred_class)
+rf_pred %>% roc_auc(truth = High, estimate = .pred_No) 
+rf_pred %>% roc_curve(truth = High, estimate = .pred_No) %>% autoplot()
+vip(rf_fit)
+```
+
+
+## Boosting
+
+```{r, boosting}
+boost_model <- 
+  boost_tree(trees = 5000, tree_depth = 4) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("classification")
+
+xgb_fit <- fit(boost_model, High ~ ., data = car_train)
+xgb_fit
+
+xgb_pred <- augment(xgb_fit, car_test) %>% print()
+
+xgb_pred %>% conf_mat(truth = High, estimate = .pred_class)
+
+xgb_pred %>% accuracy(truth = High, estimate = .pred_class)
+xgb_pred %>% roc_auc(truth = High, estimate = .pred_No) 
+xgb_pred %>% roc_curve(truth = High, estimate = .pred_No) %>% autoplot()
+vip(xgb_fit)
+```
+
+```{r, summary}
+tree_acc <- class_tree_pred %>% accuracy(truth = High, estimate = .pred_class) %>% 
+  mutate(model = "Clasif. Tree")
+tree_roc <- class_tree_pred %>% roc_auc(truth = High, estimate = .pred_No) %>% 
+  mutate(model = "Clasif. Tree")
+
+bagg_acc <- bagg_pred %>% accuracy(truth = High, estimate = .pred_class) %>% 
+  mutate(model = "Bagging")
+bagg_roc <- bagg_pred %>% roc_auc(truth = High, estimate = .pred_No) %>% 
+  mutate(model = "Bagging")
+
+rf_acc <- rf_pred %>% accuracy(truth = High, estimate = .pred_class) %>% 
+  mutate(model = "RandomForest")
+rf_roc <- rf_pred %>% roc_auc(truth = High, estimate = .pred_No) %>% 
+  mutate(model = "RandomForest")
+
+xgb_acc <- xgb_pred %>% accuracy(truth = High, estimate = .pred_class) %>% 
+  mutate(model = "xgboost")
+xgb_roc <- xgb_pred %>% roc_auc(truth = High, estimate = .pred_No)  %>% 
+  mutate(model = "xgboost")
+
+summary_models <- bind_rows(tree_acc, tree_roc,
+          bagg_acc, bagg_roc,
+          rf_acc, rf_roc,
+          xgb_acc, xgb_roc) %>% 
+  relocate(model) %>% 
+  print()
+
+
+summary_models %>% 
+  select(model, .metric, .estimate) %>% 
+  filter(.metric == "accuracy") %>% 
+  arrange(desc(.estimate))
+
+summary_models %>% 
+  select(model, .metric, .estimate) %>% 
+  filter(.metric == "roc_auc") %>% 
+  arrange(desc(.estimate))
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
