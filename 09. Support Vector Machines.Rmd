@@ -1,0 +1,204 @@
+---
+title: "09. Support Vector Machines"
+author: "GS"
+date: "26/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F, comment = "", fig.align = "center")
+```
+
+# An Introduction to Statistical Learning (2nd ed.)
+### Labs
+
+[An Introduction to Statistcial Learning](https://www.statlearning.com/)
+
+[ISLR tidymodels Labs](https://emilhvitfeldt.github.io/ISLR-tidymodels-labs/linear-regression.html)
+
+## Chapter 09
+## Support Vector Machines
+
+```{r, packages}
+library(tidymodels)
+library(ISLR)
+
+theme_set(theme_bw())
+```
+
+
+## Support Vectors Classifier
+
+```{r, synthetic data}
+set.seed(2021)
+
+sim_data <- tibble(
+  x1 = rnorm(40),
+  x2 = rnorm(40),
+  y = factor(rep(c(-1, 1), 20))
+  ) %>% 
+  mutate(x1 = ifelse(y == 1, x1 + 1.5, x1),
+         x2 = ifelse(y == 1, x2 + 1.5, x2)
+         )
+
+ggplot(sim_data, aes(x1, x2, color = y)) + 
+  geom_point()
+
+```
+```{r, linear SVM}
+svm_linear_model <- 
+  svm_poly(degree = 1) %>% 
+  set_mode("classification") %>% 
+  set_engine("kernlab", scale = F)
+
+svm_linear_fit <- 
+  svm_linear_model %>% 
+  set_args(cost = 10) %>% 
+  fit(y ~ ., data = sim_data)
+
+
+svm_linear_fit
+```
+```{r, plotting linear svm}
+library(kernlab)
+
+svm_linear_fit %>% 
+  extract_fit_engine() %>% 
+  plot()
+```
+
+```{r, linear svm cost }
+svm_linear_fit <- 
+  svm_linear_model %>% 
+  set_args(cost = .1) %>% 
+  fit(y ~ ., data = sim_data)
+
+
+svm_linear_fit
+
+svm_linear_fit %>% 
+  extract_fit_engine() %>% 
+  plot()
+```
+Now that a smaller value of the cost parameter is being used, we obtain a larger number of support vectors, because the margin is now wider.
+
+
+```{r}
+linear_svm_wf <- workflow() %>%
+  add_model(svm_linear_model %>% set_args(cost = tune())) %>%
+  add_formula(y ~ .)
+
+set.seed(2021)
+sim_data_fold <- vfold_cv(sim_data, strata = y)
+
+param_grid <- grid_regular(cost(), levels = 10)
+
+tune_res <- tune_grid(
+  linear_svm_wf, 
+  resamples = sim_data_fold, 
+  grid = param_grid
+)
+
+autoplot(tune_res)
+```
+```{r, metrics}
+tune_res %>% collect_metrics()
+tune_res %>% show_best(metric = "accuracy")
+tune_best <- tune_res %>% select_best(metric = "accuracy")
+```
+```{r, final model}
+svm_final_wf <- 
+  linear_svm_wf %>% 
+  finalize_workflow(tune_best)
+
+linear_svm_fit <- fit(svm_final_wf, sim_data)
+```
+
+```{r, testing dataset}
+set.seed(2)
+sim_data_test <- tibble(
+  x1 = rnorm(20),
+  x2 = rnorm(20),
+  y  = factor(rep(c(-1, 1), 10))
+) %>%
+  mutate(x1 = ifelse(y == 1, x1 + 1.5, x1),
+         x2 = ifelse(y == 1, x2 + 1.5, x2))
+```
+
+```{r, pred}
+pred <- augment(linear_svm_fit, sim_data_test)
+
+pred %>% conf_mat(truth = y, estimate = .pred_class)
+pred %>% accuracy(truth = y, estimate = .pred_class)
+
+```
+
+## Support Vector Machine
+
+```{r, dataset}
+set.seed(1)
+sim_data2 <- tibble(
+  x1 = rnorm(200) + rep(c(2, -2, 0), c(100, 50, 50)),
+  x2 = rnorm(200) + rep(c(2, -2, 0), c(100, 50, 50)),
+  y  = factor(rep(c(1, 2), c(150, 50)))
+)
+
+sim_data2 %>%
+  ggplot(aes(x1, x2, color = y)) +
+  geom_point()
+```
+
+```{r, radial svm}
+svm_rbf_spec <- svm_rbf() %>%
+  set_mode("classification") %>%
+  set_engine("kernlab")
+```
+```{r, fit radial svm}
+svm_rbf_fit <- svm_rbf_spec %>%
+  fit(y ~ ., data = sim_data2)
+
+svm_rbf_fit %>%
+  extract_fit_engine() %>%
+  plot()
+```
+
+
+```{r, radial svm testing}
+set.seed(2)
+sim_data2_test <- tibble(
+  x1 = rnorm(200) + rep(c(2, -2, 0), c(100, 50, 50)),
+  x2 = rnorm(200) + rep(c(2, -2, 0), c(100, 50, 50)),
+  y  = factor(rep(c(1, 2), c(150, 50)))
+)
+```
+
+
+```{r, radial svm pred}
+augment(svm_rbf_fit, new_data = sim_data2_test) %>%
+  conf_mat(truth = y, estimate = .pred_class)
+```
+```{r, ROC}
+augment(svm_rbf_fit, new_data = sim_data2_test) %>%
+  roc_curve(truth = y, estimate = .pred_1)
+
+
+augment(svm_rbf_fit, new_data = sim_data2_test) %>%
+  roc_curve(truth = y, estimate = .pred_1) %>%
+  autoplot()
+
+augment(svm_rbf_fit, new_data = sim_data2_test) %>%
+  roc_auc(truth = y, estimate = .pred_1)
+```
+
+
+
+[An Introduction to Statistcial Learning](https://www.statlearning.com/)
+
+[ISLR tidymodels Labs](https://emilhvitfeldt.github.io/ISLR-tidymodels-labs/linear-regression.html)
+
+-- END
+
+
+```{r}
+sessionInfo()
+```
