@@ -1,0 +1,339 @@
+---
+title: "12. Unsupervised Learning"
+author: "GS"
+date: "28/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = F, comment = "", message = F)
+```
+
+# An Introduction to Statistical Learning (2nd ed.)
+### Labs
+
+[An Introduction to Statistcial Learning](https://www.statlearning.com/)
+
+[ISLR tidymodels Labs](https://emilhvitfeldt.github.io/ISLR-tidymodels-labs/linear-regression.html)
+
+## Chapter 12
+## Unsupervised Learning
+
+```{r, packages}
+library(tidymodels)
+library(ISLR)
+library(patchwork)
+library(factoextra)
+
+theme_set(theme_bw())
+```
+
+```{r, dataset}
+usa <- as_tibble(USArrests, rownames = "state")
+
+```
+Notice how the mean of each of the variables is quite different. if we were to apply PCA directly to the data set then Murder would have a very small influence.
+
+```{r, means}
+usa %>% 
+  select(-state) %>% 
+  map_dfr(mean)
+```
+We will show how to perform PCA in two different ways in this section. First, by using prcomp() directly, using broom to extract the information we need, and secondly by using recipes. prcomp() Takes 1 required argument x which much be a fully numeric data.frame or matrix. Then we pass that to prcomp(). We also set scale = TRUE in prcomp() which will perform the scaling we need.
+
+```{r}
+usa_pca <- 
+  usa %>% 
+  select(-state) %>% 
+  prcomp(scale = T)
+
+usa_pca 
+usa_pca %>%  summary()
+```
+now we can use our favorite broom function to extract information from this prcomp object. We start with tidy(). tidy() can be used to extract a couple of different things, see ?broom:::tidy.prcomp() for more information. tidy() will by default extract the scores of a PCA object in long tidy format. The score of is the location of the observation in PCA space. So we can
+
+```{r}
+tidy(usa_pca)
+#tidy(usa_pca, matrix = "scores")
+```
+```{r}
+tidy(usa_pca, matrix = "loadings")
+```
+```{r}
+tidy(usa_pca, matrix = "eigenvalues")
+```
+
+```{r}
+tidy(usa_pca, matrix = "loadings") %>% 
+  ggplot(aes(value, column, fill = factor(PC))) + 
+  facet_wrap(~ PC) + 
+  geom_col() + 
+  theme(legend.position = "none")
+```
+```{r}
+tidy(usa_pca, matrix = "eigenvalues") %>% 
+  ggplot(aes(PC, percent)) + 
+  geom_col() + 
+  labs(x = "Principal Components",
+       y = "Variance (%)",
+       title = "Hola")
+```
+```{r}
+augment(usa_pca)
+```
+
+
+```{r}
+biplot(usa_pca)
+```
+
+```{r, tidymodels}
+pca_rec <- 
+  recipe(~ ., data = usa) %>% 
+  step_normalize(all_numeric_predictors()) %>% 
+  step_pca(all_numeric_predictors(), id = "pca") %>% 
+  prep()
+
+pca_rec %>% juice
+
+```
+```{r}
+tidy(pca_rec, id = "pca", type = "coef")
+```
+
+```{r}
+tidy(pca_rec, id = "pca", type = "variance")
+```
+
+```{r}
+pca_rec <- 
+  recipe(~ ., data = usa) %>% 
+  step_normalize(all_numeric_predictors()) %>% 
+  step_pca(all_numeric_predictors(), num_comp = 3) %>% 
+  prep() %>% 
+  juice() %>% 
+  print()
+```
+```{r}
+pca_rec <- 
+  recipe(~ ., data = usa) %>% 
+  step_normalize(all_numeric_predictors()) %>% 
+  step_pca(all_numeric_predictors(), threshold = .7) %>% 
+  prep() %>% 
+  juice() %>% 
+  print()
+```
+
+
+## Kmeans Clustering
+
+
+```{r}
+set.seed(2)
+
+x_df <- tibble(
+  V1 = rnorm(n = 50, mean = rep(c(0, 3), each = 25)),
+  V2 = rnorm(n = 50, mean = rep(c(0, -4), each = 25))
+)
+```
+```{r}
+x_df %>%
+  ggplot(aes(V1, V2, color = rep(c("A", "B"), each = 25))) +
+  geom_point()
+```
+```{r}
+set.seed(1234)
+(res_kmeans <- kmeans(x_df, centers = 3, nstart = 20))
+```
+```{r}
+tidy(res_kmeans)
+```
+
+```{r}
+augment(res_kmeans, data = x_df)
+```
+
+```{r}
+augment(res_kmeans, data = x_df) %>%
+  ggplot(aes(V1, V2, color = .cluster)) +
+  geom_point()
+```
+
+## Hierarchical Clustering
+
+```{r}
+res_hclust_complete <- x_df %>%
+  dist() %>%
+  hclust(method = "complete")
+
+res_hclust_average <- x_df %>%
+  dist() %>%
+  hclust(method = "average")
+
+res_hclust_single <- x_df %>%
+  dist() %>%
+  hclust(method = "single")
+```
+
+```{r}
+fviz_dend(res_hclust_complete, main = "Complete", k = 2)
+```
+```{r}
+fviz_dend(res_hclust_average, main = "average", k = 2)
+```
+
+```{r}
+fviz_dend(res_hclust_single, main = "single", k = 2)
+```
+If we don’t know the importance of the different predictors in data set it could be beneficial to scale the data such that each variable has the same influence. We can perform scaling by using scale() before dist().
+
+```{r}
+x_df %>%
+  scale() %>%
+  dist() %>%
+  hclust(method = "complete") %>%
+  fviz_dend(k = 2)
+```
+
+### NCI60 dataset
+
+```{r}
+data(NCI60, package = "ISLR")
+nci60 <- NCI60$data %>%
+  as_tibble() %>%
+  mutate(label = factor(NCI60$labs)) %>%
+  relocate(label)
+```
+
+```{r}
+nci60_pca <- nci60 %>%
+  select(-label) %>%
+  prcomp(scale = TRUE)
+
+nci60_pcs <- bind_cols(
+  augment(nci60_pca),
+  nci60 %>% select(label)
+  )
+
+colors <- unname(palette.colors(n = 14, palette = "Polychrome 36"))
+```
+
+```{r}
+nci60_pcs %>%
+  ggplot(aes(.fittedPC1, .fittedPC2, color = label)) +
+  geom_point() +
+  theme_minimal() +
+  scale_color_manual(values = colors)
+```
+
+```{r}
+nci60_pcs %>%
+  ggplot(aes(.fittedPC1, .fittedPC3, color = label)) +
+  geom_point() +
+  theme_minimal() +
+  scale_color_manual(values = colors)
+```
+
+```{r}
+tidy(nci60_pca, matrix = "eigenvalues") %>%
+  ggplot(aes(PC, percent)) +
+  geom_point() +
+  geom_line()
+```
+```{r}
+tidy(nci60_pca, matrix = "eigenvalues") %>%
+  ggplot(aes(PC, cumulative)) +
+  geom_point() +
+  geom_line()
+```
+
+
+```{r}
+nci60_scaled <- recipe(~ ., data = nci60) %>%
+  step_rm(label) %>%
+  step_normalize(all_predictors()) %>%
+  prep() %>%
+  bake(new_data = NULL)
+```
+
+```{r}
+nci60_complete <- nci60_scaled %>%
+    dist() %>%
+    hclust(method = "complete")
+
+nci60_average <- nci60_scaled %>%
+    dist() %>%
+    hclust(method = "average")
+
+nci60_single <- nci60_scaled %>%
+    dist() %>%
+    hclust(method = "single")
+```
+
+```{r}
+fviz_dend(nci60_complete, main = "Complete")
+```
+
+```{r}
+fviz_dend(nci60_average, main = "Average")
+```
+
+```{r}
+fviz_dend(nci60_single, main = "Single")
+```
+
+```{r}
+nci60_complete %>%
+  fviz_dend(k = 4, main = "hclust(complete) on nci60")
+```
+
+Sometimes useful is to perform dimensionality reduction before using the clustering method. Let us use the recipes package to calculate the PCA of nci60 and keep the 5 first components. (we could have started with nci60 too if we added step_rm() and step_normalize()).
+
+```{r}
+nci60_pca <- recipe(~., nci60_scaled) %>%
+  step_pca(all_predictors(), num_comp = 5) %>%
+  prep() %>%
+  bake(new_data = NULL)
+
+nci60_pca %>%
+  dist() %>%
+  hclust() %>%
+  fviz_dend(k = 4, main = "hclust on first five PCs")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[An Introduction to Statistcial Learning](https://www.statlearning.com/)
+
+[ISLR tidymodels Labs](https://emilhvitfeldt.github.io/ISLR-tidymodels-labs/linear-regression.html)
+
+-- END
+
+
+```{r}
+sessionInfo()
+```
